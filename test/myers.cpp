@@ -148,3 +148,68 @@ TEST(myers, replacement_front) {
 }
 
 //----------------------------------------------------------------------------------------------------------------------
+
+TEST(myers, transcription_pairing) {
+    std::vector<std::string> src_keys = {
+        "banana_preset(foobar::banana_preset &&)",
+        "banana_preset(const foobar::banana_preset &)",
+        "explicit banana_preset(std::shared_ptr<implementation>)",
+    };
+
+    std::vector<std::string> dst_keys = {
+        "explicit banana_preset(std::shared_ptr<implementation>)",
+        "banana_preset(const banana_preset &)",
+        "banana_preset(banana_preset &&)",
+    };
+
+    struct pair {
+        std::string src;
+        std::string dst;
+    };
+    std::vector<pair> result;
+
+    const auto score = [](const patch& p) {
+        std::size_t score = 0;
+
+        for (const auto& c : p) {
+            switch (c.operation) {
+                case operation::cpy: break;
+                case operation::del:
+                case operation::ins: {
+                    score += c.text.size();
+                } break;
+            }
+        }
+
+        return score;
+    };
+
+    while (!src_keys.empty()) {
+        pair cur_pair;
+        cur_pair.src = std::move(src_keys.back());
+        src_keys.pop_back();
+        std::size_t best_match = std::numeric_limits<std::size_t>::max();
+        std::size_t best_index = 0;
+        for (std::size_t i = 0; i < dst_keys.size(); ++i) {
+            const auto patch = diff(cur_pair.src, dst_keys[i]);
+            std::size_t cur_match = score(patch);
+            if (cur_match > best_match) {
+                continue;
+            }
+            best_match = cur_match;
+            best_index = i;
+        }
+        cur_pair.dst = std::move(dst_keys[best_index]);
+        dst_keys.erase(dst_keys.begin() + best_index);
+        result.emplace_back(std::move(cur_pair));
+    }
+
+    EXPECT_EQ(result[0].src, "explicit banana_preset(std::shared_ptr<implementation>)");
+    EXPECT_EQ(result[0].dst, "explicit banana_preset(std::shared_ptr<implementation>)");
+    EXPECT_EQ(result[1].src, "banana_preset(const foobar::banana_preset &)");
+    EXPECT_EQ(result[1].dst, "banana_preset(const banana_preset &)");
+    EXPECT_EQ(result[2].src, "banana_preset(foobar::banana_preset &&)");
+    EXPECT_EQ(result[2].dst, "banana_preset(banana_preset &&)");
+}
+
+//----------------------------------------------------------------------------------------------------------------------
