@@ -5,7 +5,7 @@
  * Copyright 2024 Adobe
  * https://github.com/google/diff-match-patch
  * https://github.com/gritzko/myers-diff
- * https://github.com/fosterbrereton/myers-diff/
+ * https://github.com/fosterbrereton/diff/
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,7 @@
 #ifndef FOSTERBRERETON_DIFF_MYERS_HPP
 #define FOSTERBRERETON_DIFF_MYERS_HPP
 
-#include <algorithm>
-#include <cassert>
-#include <chrono>
-#include <cstdint>
-#include <limits>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 //----------------------------------------------------------------------------------------------------------------------
@@ -66,62 +60,18 @@ patch diff(std::string_view text1, std::string_view text2);
 
 //----------------------------------------------------------------------------------------------------------------------
 /**
- * Determine the common prefix of two strings
- * @param text1 First string.
- * @param text2 Second string.
- * @return The number of characters common to the start of each string.
- */
-std::size_t common_prefix(std::string_view text1, std::string_view text2) {
-    // Performance analysis: https://neil.fraser.name/news/2007/10/09/
-    std::size_t n = std::min(text1.size(), text2.size());
-    for (int i = 0; i < n; i++) {
-        if (text1[i] != text2[i]) {
-            return i;
-        }
-    }
-    return n;
-}
-
-/**
- * Determine the common suffix of two strings
- * @param text1 First string.
- * @param text2 Second string.
- * @return The number of characters common to the end of each string.
- */
-std::size_t common_suffix(std::string_view text1, std::string_view text2) {
-    // Performance analysis: https://neil.fraser.name/news/2007/10/09/
-    std::size_t text1_length = text1.size();
-    std::size_t text2_length = text2.size();
-    std::size_t n = std::min(text1_length, text2_length);
-    for (std::size_t i = 1; i <= n; i++) {
-        if (text1[text1_length - i] != text2[text2_length - i]) {
-            return i - 1;
-        }
-    }
-    return n;
-}
-
-/**
- * Given the location of the 'middle snake', split the diff in two parts
- * and recurse.
+ * Given the location of the 'middle snake', split the diff in two parts and recurse.
  * @param text1 Old string to be diffed.
  * @param text2 New string to be diffed.
  * @param x Index of split point in text1.
  * @param y Index of split point in text2.
- * @return std::vector of Diff objects.
+ * @return std::vector of `change` objects.
  */
 patch bisect_split(std::string_view text1, std::string_view text2, std::size_t x, std::size_t y) {
-    std::string_view text1a = text1.substr(0, x);
-    std::string_view text2a = text2.substr(0, y);
-    std::string_view text1b = text1.substr(x);
-    std::string_view text2b = text2.substr(y);
-
-    // Compute both diffs serially.
-    patch diffs = diff(text1a, text2a);
-    patch diffsb = diff(text1b, text2b);
-
-    diffs.insert(diffs.end(), diffsb.begin(), diffsb.end());
-    return diffs;
+    patch lhs = diff(text1.substr(0, x), text2.substr(0, y));
+    patch rhs = diff(text1.substr(x), text2.substr(y));
+    lhs.insert(lhs.end(), rhs.begin(), rhs.end());
+    return lhs;
 }
 
 /**
@@ -130,36 +80,34 @@ patch bisect_split(std::string_view text1, std::string_view text2, std::size_t x
  * See Myers 1986 paper: An O(ND) Difference Algorithm and Its Variations.
  * @param text1 Old string to be diffed.
  * @param text2 New string to be diffed.
- * @return std::vector of Diff objects.
+ * @return std::vector of `change` objects.
  */
 patch bisect(std::string_view text1, std::string_view text2) {
     // Cache the text lengths to prevent multiple calls.
-    std::size_t text1_length = text1.size();
-    std::size_t text2_length = text2.size();
-    std::size_t max_d = (text1_length + text2_length + 1) / 2;
-    std::size_t v_offset = max_d;
-    std::size_t v_length = 2 * max_d;
-    std::vector<std::size_t> v1;
-    v1.resize(v_length);
-    std::vector<std::size_t> v2;
-    v2.resize(v_length);
-    for (std::size_t x = 0; x < v_length; x++) {
-        v1[x] = std::string_view::npos;
-        v2[x] = std::string_view::npos;
-    }
-    v1[v_offset + 1] = 0;
-    v2[v_offset + 1] = 0;
-    std::size_t delta = text1_length - text2_length;
+    const std::size_t text1_length = text1.size();
+    const std::size_t text2_length = text2.size();
+    const std::size_t max_d = (text1_length + text2_length + 1) / 2;
+    const std::size_t v_offset = max_d;
+    const std::size_t v_length = 2 * max_d;
+    std::vector<std::size_t> v1(v_length, std::string_view::npos);
+    std::vector<std::size_t> v2(v_length, std::string_view::npos);
+    const long long delta = text1_length - text2_length;
+
     // If the total number of characters is odd, then the front path will
     // collide with the reverse path.
-    bool front = (delta % 2 != 0);
+    const bool front = (delta % 2 != 0);
+
+    v1[v_offset + 1] = 0;
+    v2[v_offset + 1] = 0;
+
     // Offsets for start and end of k loop.
     // Prevents mapping of space beyond the grid.
     std::size_t k1start = 0;
     std::size_t k1end = 0;
     std::size_t k2start = 0;
     std::size_t k2end = 0;
-    for (std::size_t d = 0; d < max_d; d++) {
+
+    for (std::size_t d = 0; d < max_d; ++d) {
         // Walk the front path one step.
         for (std::size_t k1 = -d + k1start; k1 <= d - k1end; k1 += 2) {
             std::size_t k1_offset = v_offset + k1;
@@ -231,7 +179,8 @@ patch bisect(std::string_view text1, std::string_view text2) {
             }
         }
     }
-    // Number of diffs equals number of characters; no commonality at all.
+
+    // Number of changes equals number of characters
     patch diffs;
     diffs.emplace_back(change{operation::del, text1});
     diffs.emplace_back(change{operation::ins, text2});
@@ -243,46 +192,78 @@ patch bisect(std::string_view text1, std::string_view text2) {
  * have any common prefix or suffix.
  * @param text1 Old string to be diffed.
  * @param text2 New string to be diffed.
- * @return std::vector of Diff objects.
+ * @return std::vector of `change` objects.
  */
 patch compute(std::string_view text1, std::string_view text2) {
-    patch diffs;
-
-    if (text1.size() == 0) {
-        // Just add some text (speedup).
-        diffs.emplace_back(change{operation::ins, text2});
-        return diffs;
+    if (text1.empty()) {
+        return patch(1, {operation::ins, text2});
     }
 
-    if (text2.size() == 0) {
-        // Just delete some text (speedup).
-        diffs.emplace_back(change{operation::del, text1});
-        return diffs;
+    if (text2.empty()) {
+        return patch(1, {operation::del, text1});
     }
 
     const bool is_t1_longer = text1.size() > text2.size();
-    std::string_view longtext = is_t1_longer ? text1 : text2;
-    std::string_view shorttext = is_t1_longer ? text2 : text1;
-    std::size_t i = longtext.find(shorttext);
+    const std::string_view& longtext = is_t1_longer ? text1 : text2;
+    const std::string_view& shorttext = is_t1_longer ? text2 : text1;
+    const std::size_t i = longtext.find(shorttext);
 
     if (i != std::string_view::npos) {
         // Shorter text is inside the longer text (speedup).
+        patch result;
         operation op = is_t1_longer ? operation::del : operation::ins;
-        diffs.emplace_back(change{op, longtext.substr(0, i)});
-        diffs.emplace_back(change{operation::cpy, shorttext});
-        diffs.emplace_back(change{op, longtext.substr(i + shorttext.size())});
-        return diffs;
+        result.emplace_back(change{op, longtext.substr(0, i)});
+        result.emplace_back(change{operation::cpy, shorttext});
+        result.emplace_back(change{op, longtext.substr(i + shorttext.size())});
+        return result;
     }
 
     if (shorttext.size() == 1) {
         // Single character string.
         // After the previous speedup, the character can't be an equality.
-        diffs.emplace_back(change{operation::del, text1});
-        diffs.emplace_back(change{operation::ins, text2});
-        return diffs;
+        patch result;
+        result.emplace_back(change{operation::del, text1});
+        result.emplace_back(change{operation::ins, text2});
+        return result;
     }
 
     return bisect(text1, text2);
+}
+
+/**
+ * Determine the common prefix of two strings
+ * @param text1 First string.
+ * @param text2 Second string.
+ * @return The number of characters common to the start of each string.
+ */
+std::size_t common_prefix(std::string_view text1, std::string_view text2) {
+    // Performance analysis: https://neil.fraser.name/news/2007/10/09/
+    std::size_t n = std::min(text1.size(), text2.size());
+    for (int i = 0; i < n; i++) {
+        if (text1[i] != text2[i]) {
+            return i;
+        }
+    }
+    return n;
+}
+
+/**
+ * Determine the common suffix of two strings
+ * @param text1 First string.
+ * @param text2 Second string.
+ * @return The number of characters common to the end of each string.
+ */
+std::size_t common_suffix(std::string_view text1, std::string_view text2) {
+    // Performance analysis: https://neil.fraser.name/news/2007/10/09/
+    std::size_t text1_length = text1.size();
+    std::size_t text2_length = text2.size();
+    std::size_t n = std::min(text1_length, text2_length);
+    for (std::size_t i = 1; i <= n; i++) {
+        if (text1[text1_length - i] != text2[text2_length - i]) {
+            return i - 1;
+        }
+    }
+    return n;
 }
 
 /**
@@ -292,12 +273,8 @@ patch compute(std::string_view text1, std::string_view text2) {
  */
 patch diff(std::string_view text1, std::string_view text2) {
     // Check for equality (speedup).
-    patch diffs;
     if (text1 == text2) {
-        if (text1.size() != 0) {
-            diffs.emplace_back(change{operation::cpy, text1});
-        }
-        return diffs;
+        return text1.empty() ? patch() : patch(1, {operation::cpy, text1});
     }
 
     // Trim off common prefix (speedup).
@@ -312,18 +289,22 @@ patch diff(std::string_view text1, std::string_view text2) {
     text1 = text1.substr(0, text1.size() - commonlength);
     text2 = text2.substr(0, text2.size() - commonlength);
 
-    // Compute the diff on the middle block.
-    diffs = compute(text1, text2);
+    patch result;
 
-    // Restore the prefix and suffix.
-    if (commonprefix.size() != 0) {
-        diffs.insert(diffs.begin(), change{operation::cpy, commonprefix});
-    }
-    if (commonsuffix.size() != 0) {
-        diffs.emplace_back(change{operation::cpy, commonsuffix});
+    if (!commonprefix.empty()) {
+        result.emplace_back(change{operation::cpy, commonprefix});
     }
 
-    return diffs;
+    auto mid_block = compute(text1, text2);
+    result.insert(result.end(),
+                  std::make_move_iterator(mid_block.begin()),
+                  std::make_move_iterator(mid_block.end()));
+
+    if (!commonsuffix.empty()) {
+        result.emplace_back(change{operation::cpy, commonsuffix});
+    }
+
+    return result;
 }
 
 //----------------------------------------------------------------------------------------------------------------------
