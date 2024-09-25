@@ -1,8 +1,8 @@
 /*
- * Diff (without the Match and Patch) (and a number of other reductions)
+ * Diff (without the Match and Patch) (and a number of other modernizations)
  * Copyright 2018 The diff-match-patch Authors.
  * Copyright 2019 Victor Grishchenko
- * Copyright 2024 Adobe
+ * Copyright 2024 Foster Brereton
  * https://github.com/google/diff-match-patch
  * https://github.com/gritzko/myers-diff
  * https://github.com/fosterbrereton/diff/
