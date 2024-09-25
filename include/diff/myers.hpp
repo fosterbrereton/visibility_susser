@@ -56,6 +56,10 @@ using patch = std::vector<change>;
 
 //----------------------------------------------------------------------------------------------------------------------
 
+namespace detail {
+
+//----------------------------------------------------------------------------------------------------------------------
+
 patch diff(std::string_view text1, std::string_view text2);
 
 //----------------------------------------------------------------------------------------------------------------------
@@ -84,17 +88,17 @@ patch bisect_split(std::string_view text1, std::string_view text2, std::size_t x
  */
 patch bisect(std::string_view text1, std::string_view text2) {
     // Cache the text lengths to prevent multiple calls.
-    const std::size_t text1_length = text1.size();
-    const std::size_t text2_length = text2.size();
-    const std::size_t max_d = (text1_length + text2_length + 1) / 2;
-    const std::size_t v_offset = max_d;
-    const std::size_t v_length = 2 * max_d;
-    std::vector<std::size_t> v1(v_length, std::string_view::npos);
-    std::vector<std::size_t> v2(v_length, std::string_view::npos);
-    const long long delta = text1_length - text2_length;
+    const int text1_length = static_cast<int>(text1.size());
+    const int text2_length = static_cast<int>(text2.size());
+    const int max_d = (text1_length + text2_length + 1) / 2;
+    const int v_offset = max_d;
+    const int v_length = 2 * max_d;
+    std::vector<int> v1(v_length, -1);
+    std::vector<int> v2(v_length, -1);
 
     // If the total number of characters is odd, then the front path will
     // collide with the reverse path.
+    const int delta = std::abs(text1_length - text2_length);
     const bool front = (delta % 2 != 0);
 
     v1[v_offset + 1] = 0;
@@ -102,22 +106,22 @@ patch bisect(std::string_view text1, std::string_view text2) {
 
     // Offsets for start and end of k loop.
     // Prevents mapping of space beyond the grid.
-    std::size_t k1start = 0;
-    std::size_t k1end = 0;
-    std::size_t k2start = 0;
-    std::size_t k2end = 0;
+    int k1start = 0;
+    int k1end = 0;
+    int k2start = 0;
+    int k2end = 0;
 
-    for (std::size_t d = 0; d < max_d; ++d) {
+    for (int d = 0; d < max_d; ++d) {
         // Walk the front path one step.
-        for (std::size_t k1 = -d + k1start; k1 <= d - k1end; k1 += 2) {
-            std::size_t k1_offset = v_offset + k1;
-            std::size_t x1;
+        for (int k1 = -d + k1start; k1 <= d - k1end; k1 += 2) {
+            int k1_offset = v_offset + k1;
+            int x1;
             if (k1 == -d || (k1 != d && v1[k1_offset - 1] < v1[k1_offset + 1])) {
                 x1 = v1[k1_offset + 1];
             } else {
                 x1 = v1[k1_offset - 1] + 1;
             }
-            std::size_t y1 = x1 - k1;
+            int y1 = x1 - k1;
             while (x1 < text1_length && y1 < text2_length && text1[x1] == text2[y1]) {
                 x1++;
                 y1++;
@@ -130,10 +134,10 @@ patch bisect(std::string_view text1, std::string_view text2) {
                 // Ran off the bottom of the graph.
                 k1start += 2;
             } else if (front) {
-                std::size_t k2_offset = v_offset + delta - k1;
-                if (k2_offset >= 0 && k2_offset < v_length && v2[k2_offset] != std::string_view::npos) {
+                int k2_offset = v_offset + delta - k1;
+                if (k2_offset >= 0 && k2_offset < v_length && v2[k2_offset] != -1) {
                     // Mirror x2 onto top-left coordinate system.
-                    std::size_t x2 = text1_length - v2[k2_offset];
+                    int x2 = text1_length - v2[k2_offset];
                     if (x1 >= x2) {
                         // Overlap detected.
                         return bisect_split(text1, text2, x1, y1);
@@ -143,15 +147,15 @@ patch bisect(std::string_view text1, std::string_view text2) {
         }
 
         // Walk the reverse path one step.
-        for (std::size_t k2 = -d + k2start; k2 <= d - k2end; k2 += 2) {
-            std::size_t k2_offset = v_offset + k2;
-            std::size_t x2;
+        for (int k2 = -d + k2start; k2 <= d - k2end; k2 += 2) {
+            int k2_offset = v_offset + k2;
+            int x2;
             if (k2 == -d || (k2 != d && v2[k2_offset - 1] < v2[k2_offset + 1])) {
                 x2 = v2[k2_offset + 1];
             } else {
                 x2 = v2[k2_offset - 1] + 1;
             }
-            std::size_t y2 = x2 - k2;
+            int y2 = x2 - k2;
             while (x2 < text1_length && y2 < text2_length &&
                    text1[text1_length - x2 - 1] == text2[text2_length - y2 - 1]) {
                 x2++;
@@ -165,10 +169,10 @@ patch bisect(std::string_view text1, std::string_view text2) {
                 // Ran off the top of the graph.
                 k2start += 2;
             } else if (!front) {
-                std::size_t k1_offset = v_offset + delta - k2;
-                if (k1_offset >= 0 && k1_offset < v_length && v1[k1_offset] != std::string_view::npos) {
-                    std::size_t x1 = v1[k1_offset];
-                    std::size_t y1 = v_offset + x1 - k1_offset;
+                int k1_offset = v_offset + delta - k2;
+                if (k1_offset >= 0 && k1_offset < v_length && v1[k1_offset] != -1) {
+                    int x1 = v1[k1_offset];
+                    int y1 = v_offset + x1 - k1_offset;
                     // Mirror x2 onto top-left coordinate system.
                     x2 = text1_length - x2;
                     if (x1 >= x2) {
@@ -303,6 +307,45 @@ patch diff(std::string_view text1, std::string_view text2) {
     if (!commonsuffix.empty()) {
         result.emplace_back(change{operation::cpy, commonsuffix});
     }
+
+    return result;
+}
+
+} // namespace detail
+
+patch diff(std::string_view text1, std::string_view text2) {
+    patch result = detail::diff(text1, text2);
+
+    if (result.size() < 2) {
+        return result;
+    }
+
+    // the implementation may subdivide along boundaries that
+    // can be joined together to produce a "tighter" patch.
+    // For example, two back-to-back `del` operations can be
+    // united into one. Therefore, run through the set of
+    // patches looking for adjacent pairs that have the same
+    // operation, and merge them together.
+
+    change* current = &result[0];
+    change* next = &result[1];
+    change* last = &result[result.size() - 1];
+
+    while (next != last) {
+        if (current->operation == next->operation) {
+            current->text = std::string_view(current->text.data(), current->text.length() + next->text.length());
+            next->text = std::string_view();
+        } else {
+            current = next;
+        }
+
+        ++next;
+    }
+
+    // Now that the views have been reconciled, we'll have some
+    // with zero lengths. Erase those.
+    auto new_end = std::remove_if(result.begin(), result.end(), [](const auto& change){ return change.text.empty(); });
+    result.erase(new_end, result.end());
 
     return result;
 }

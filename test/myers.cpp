@@ -149,7 +149,94 @@ TEST(myers, replacement_front) {
 
 //----------------------------------------------------------------------------------------------------------------------
 
-TEST(myers, transcription_pairing) {
+TEST(myers, replacement_middle) {
+    {
+    const patch computed = diff("explicit application(apollo::any_scheduler, apollo::any_error_handler, apollo::any_crumb_handler, apollo::application::idle_timer, apollo::core_settings)",
+                                "explicit application(any_scheduler, any_error_handler, any_crumb_handler, idle_timer, core_settings)");
+    const patch expected = {
+        { operation::cpy, "banana_" },
+        { operation::del, "foofoofoo" },
+        { operation::ins, "barbarbar" },
+    };
+    examine_results(computed, expected);
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+
+struct transcribe_pair {
+    std::string src;
+    std::string dst;
+};
+
+using transcribe_pairs = std::vector<transcribe_pair>;
+
+// This is O(N^2), where N is the size of both `src` and `dst`. Therefore transcription
+// should only be run when it is shown to be necessary. At the same time, if your code base
+// has enough overrides to really slow this algorithm down, the performance of this routine
+// is the least of your concerns.
+transcribe_pairs derive_transcribe_pairs(std::vector<std::string> src, std::vector<std::string> dst) {
+    if (src.size() != dst.size()) {
+        std::cerr << "WARNING: transcription key count mismatch\n";
+    }
+
+    const auto score = [](const myers::patch& p) {
+        std::size_t score = 0;
+
+        for (const auto& c : p) {
+            switch (c.operation) {
+                case myers::operation::cpy:
+                    break;
+                case myers::operation::del:
+                case myers::operation::ins: {
+                    score += c.text.size();
+                } break;
+            }
+        }
+
+        return score;
+    };
+
+    transcribe_pairs result;
+
+    while (!src.empty()) {
+        transcribe_pair cur_pair;
+
+        // pop a key off the old name set
+        cur_pair.src = std::move(src.back());
+        src.pop_back();
+
+        // find the best match of the dst keys to the src key
+        std::size_t best_match = std::numeric_limits<std::size_t>::max();
+        std::size_t best_index = 0;
+        for (std::size_t i = 0; i < dst.size(); ++i) {
+            // generate the meyers diff of the src key and the candidate dst
+            const myers::patch patch = myers::diff(cur_pair.src, dst[i]);
+            std::size_t cur_match = score(patch);
+
+            if (cur_match > best_match) {
+                continue;
+            }
+
+            // if this dst candidate is better than what we've seen, remember that.
+            best_match = cur_match;
+            best_index = i;
+        }
+
+        // pair the best match dst and src keys and remove dst
+        cur_pair.dst = std::move(dst[best_index]);
+        dst.erase(dst.begin() + best_index);
+
+        // save off the pair and repeat
+        result.emplace_back(std::move(cur_pair));
+    }
+
+    return result;
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+
+TEST(myers, transcription_pairing_0) {
     std::vector<std::string> src_keys = {
         "banana_preset(foobar::banana_preset &&)",
         "banana_preset(const foobar::banana_preset &)",
@@ -162,47 +249,7 @@ TEST(myers, transcription_pairing) {
         "banana_preset(banana_preset &&)",
     };
 
-    struct pair {
-        std::string src;
-        std::string dst;
-    };
-    std::vector<pair> result;
-
-    const auto score = [](const patch& p) {
-        std::size_t score = 0;
-
-        for (const auto& c : p) {
-            switch (c.operation) {
-                case operation::cpy: break;
-                case operation::del:
-                case operation::ins: {
-                    score += c.text.size();
-                } break;
-            }
-        }
-
-        return score;
-    };
-
-    while (!src_keys.empty()) {
-        pair cur_pair;
-        cur_pair.src = std::move(src_keys.back());
-        src_keys.pop_back();
-        std::size_t best_match = std::numeric_limits<std::size_t>::max();
-        std::size_t best_index = 0;
-        for (std::size_t i = 0; i < dst_keys.size(); ++i) {
-            const auto patch = diff(cur_pair.src, dst_keys[i]);
-            std::size_t cur_match = score(patch);
-            if (cur_match > best_match) {
-                continue;
-            }
-            best_match = cur_match;
-            best_index = i;
-        }
-        cur_pair.dst = std::move(dst_keys[best_index]);
-        dst_keys.erase(dst_keys.begin() + best_index);
-        result.emplace_back(std::move(cur_pair));
-    }
+    const auto result = derive_transcribe_pairs(src_keys, dst_keys);
 
     EXPECT_EQ(result[0].src, "explicit banana_preset(std::shared_ptr<implementation>)");
     EXPECT_EQ(result[0].dst, "explicit banana_preset(std::shared_ptr<implementation>)");
@@ -210,6 +257,35 @@ TEST(myers, transcription_pairing) {
     EXPECT_EQ(result[1].dst, "banana_preset(const banana_preset &)");
     EXPECT_EQ(result[2].src, "banana_preset(foobar::banana_preset &&)");
     EXPECT_EQ(result[2].dst, "banana_preset(banana_preset &&)");
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+
+TEST(myers, transcription_pairing_1) {
+    std::vector<std::string> src_keys = {
+        "application()",
+        "application(foobar::application &&)",
+        "application(const foobar::application &)",
+        "explicit application(foobar::any_scheduler, foobar::any_error_handler, foobar::any_crumb_handler, foobar::application::idle_timer, foobar::core_settings)",
+    };
+
+    std::vector<std::string> dst_keys = {
+        "application()",
+        "application(application &&)",
+        "application(const application &)",
+        "explicit application(any_scheduler, any_error_handler, any_crumb_handler, idle_timer, core_settings)",
+    };
+
+    const auto result = derive_transcribe_pairs(src_keys, dst_keys);
+
+    EXPECT_EQ(result[0].src, "application()");
+    EXPECT_EQ(result[0].dst, "application()");
+    EXPECT_EQ(result[1].src, "application(foobar::application &&)");
+    EXPECT_EQ(result[1].dst, "application(application &&)");
+    EXPECT_EQ(result[2].src, "application(const foobar::application &)");
+    EXPECT_EQ(result[2].dst, "application(const application &)");
+    EXPECT_EQ(result[3].src, "explicit application(foobar::any_scheduler, foobar::any_error_handler, foobar::any_crumb_handler, foobar::application::idle_timer, foobar::core_settings)");
+    EXPECT_EQ(result[3].dst, "explicit application(any_scheduler, any_error_handler, any_crumb_handler, idle_timer, core_settings)");
 }
 
 //----------------------------------------------------------------------------------------------------------------------
