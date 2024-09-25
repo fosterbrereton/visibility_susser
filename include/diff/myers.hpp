@@ -90,7 +90,7 @@ patch bisect(std::string_view text1, std::string_view text2) {
     // Cache the text lengths to prevent multiple calls.
     const int text1_length = static_cast<int>(text1.size());
     const int text2_length = static_cast<int>(text2.size());
-    const int max_d = (text1_length + text2_length + 1) / 2;
+    const int max_d = (text1_length + text2_length + 1) / 2; // ceiling((m+n) / 2)
     const int v_offset = max_d;
     const int v_length = 2 * max_d;
     std::vector<int> v1(v_length, -1);
@@ -98,8 +98,8 @@ patch bisect(std::string_view text1, std::string_view text2) {
 
     // If the total number of characters is odd, then the front path will
     // collide with the reverse path.
-    const int delta = std::abs(text1_length - text2_length);
-    const bool front = (delta % 2 != 0);
+    const int delta = text1_length - text2_length;
+    const bool front = std::abs(delta) % 2 != 0;
 
     v1[v_offset + 1] = 0;
     v2[v_offset + 1] = 0;

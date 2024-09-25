@@ -126,6 +126,15 @@ TEST(myers, replacement_1) {
 
 //----------------------------------------------------------------------------------------------------------------------
 
+TEST(myers, replacement_2) {
+    // a test to ensure this diff completes. The results are immaterial.
+    const patch computed = diff("template <typename... Ts, typename >\nconstexpr static bool has_channel(const std::variant<Ts...> &)",
+                                "template <typename U, std::enable_if_t<std::is_same<S, U>::value> * >\nconstexpr static bool has_channel(const U &)");
+    EXPECT_TRUE(!computed.empty());
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+
 TEST(myers, replacement_back) {
     {
     const patch computed = diff("banana_foofoofoo", "banana_barbarbar");
