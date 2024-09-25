@@ -67,19 +67,6 @@ void examine_results(const patch& computed, const patch& expected) {
 
 //----------------------------------------------------------------------------------------------------------------------
 
-TEST(myers, replacement_0) {
-    const patch computed = diff("if (foo::size(result)) {", "if (bar::get_size(result)) {");
-    const patch expected = {
-        { operation::cpy, "if (" },
-        { operation::del, "foo::" },
-        { operation::ins, "bar::get_" },
-        { operation::cpy, "size(result)) {" },
-    };
-    examine_results(computed, expected);
-}
-
-//----------------------------------------------------------------------------------------------------------------------
-
 TEST(myers, equality) {
     const patch computed = diff("banana", "banana");
     const patch expected = {
@@ -90,11 +77,49 @@ TEST(myers, equality) {
 
 //----------------------------------------------------------------------------------------------------------------------
 
-TEST(myers, replacement_all) {
+TEST(myers, empty_cases) {
+    {
+    const patch computed = diff("", "banana");
+    const patch expected = {
+        { operation::ins, "banana" },
+    };
+    examine_results(computed, expected);
+    }
+
+    {
+    const patch computed = diff("banana", "");
+    const patch expected = {
+        { operation::del, "banana" },
+    };
+    examine_results(computed, expected);
+    }
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+
+TEST(myers, replacement_0) {
+    const patch computed = diff("if (foo::size(result)) {", "if (bar::get_size(result)) {");
+    const patch expected = {
+        { operation::cpy, "if (" },
+        { operation::del, "foo" },
+        { operation::ins, "bar" },
+        { operation::cpy, "::" },
+        { operation::ins, "get_" },
+        { operation::cpy, "size(result)) {" },
+    };
+    examine_results(computed, expected);
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+
+TEST(myers, replacement_1) {
     const patch computed = diff("bar_banana_foo", "foo_banana_bar");
     const patch expected = {
-        { operation::del, "bar_banana_foo" },
-        { operation::ins, "foo_banana_bar" },
+        { operation::del, "bar" },
+        { operation::ins, "foo" },
+        { operation::cpy, "_banana_" },
+        { operation::del, "foo" },
+        { operation::ins, "bar" },
     };
     examine_results(computed, expected);
 }
@@ -142,21 +167,6 @@ TEST(myers, replacement_front) {
         { operation::del, "a" },
         { operation::ins, "b" },
         { operation::cpy, "banana" },
-    };
-    examine_results(computed, expected);
-    }
-}
-
-//----------------------------------------------------------------------------------------------------------------------
-
-TEST(myers, replacement_middle) {
-    {
-    const patch computed = diff("explicit application(apollo::any_scheduler, apollo::any_error_handler, apollo::any_crumb_handler, apollo::application::idle_timer, apollo::core_settings)",
-                                "explicit application(any_scheduler, any_error_handler, any_crumb_handler, idle_timer, core_settings)");
-    const patch expected = {
-        { operation::cpy, "banana_" },
-        { operation::del, "foofoofoo" },
-        { operation::ins, "barbarbar" },
     };
     examine_results(computed, expected);
     }
@@ -278,14 +288,14 @@ TEST(myers, transcription_pairing_1) {
 
     const auto result = derive_transcribe_pairs(src_keys, dst_keys);
 
-    EXPECT_EQ(result[0].src, "application()");
-    EXPECT_EQ(result[0].dst, "application()");
-    EXPECT_EQ(result[1].src, "application(foobar::application &&)");
-    EXPECT_EQ(result[1].dst, "application(application &&)");
-    EXPECT_EQ(result[2].src, "application(const foobar::application &)");
-    EXPECT_EQ(result[2].dst, "application(const application &)");
-    EXPECT_EQ(result[3].src, "explicit application(foobar::any_scheduler, foobar::any_error_handler, foobar::any_crumb_handler, foobar::application::idle_timer, foobar::core_settings)");
-    EXPECT_EQ(result[3].dst, "explicit application(any_scheduler, any_error_handler, any_crumb_handler, idle_timer, core_settings)");
+    EXPECT_EQ(result[0].src, "explicit application(foobar::any_scheduler, foobar::any_error_handler, foobar::any_crumb_handler, foobar::application::idle_timer, foobar::core_settings)");
+    EXPECT_EQ(result[0].dst, "explicit application(any_scheduler, any_error_handler, any_crumb_handler, idle_timer, core_settings)");
+    EXPECT_EQ(result[1].src, "application(const foobar::application &)");
+    EXPECT_EQ(result[1].dst, "application(const application &)");
+    EXPECT_EQ(result[2].src, "application(foobar::application &&)");
+    EXPECT_EQ(result[2].dst, "application(application &&)");
+    EXPECT_EQ(result[3].src, "application()");
+    EXPECT_EQ(result[3].dst, "application()");
 }
 
 //----------------------------------------------------------------------------------------------------------------------

@@ -311,7 +311,11 @@ patch diff(std::string_view text1, std::string_view text2) {
     return result;
 }
 
+//----------------------------------------------------------------------------------------------------------------------
+
 } // namespace detail
+
+//----------------------------------------------------------------------------------------------------------------------
 
 patch diff(std::string_view text1, std::string_view text2) {
     patch result = detail::diff(text1, text2);
