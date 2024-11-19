@@ -4,6 +4,7 @@
 #include <format>
 #include <sstream>
 #include <unordered_map>
+#include <regex>
 
 // sys
 #include <unistd.h> // mkstemps
@@ -135,34 +136,76 @@ std::string human_size(std::size_t size, bool expanded = true) {
 
 //----------------------------------------------------------------------------------------------------------------------
 
+struct symbol_binding {
+    std::string user;
+    std::size_t user_index;
+    std::string address; // this is the value that matters in terms of uniqueness.
+    std::string provider;
+    std::string name;
+};
+
+//----------------------------------------------------------------------------------------------------------------------
+
+std::optional<symbol_binding> process_binding_statement(const std::string_view& statement) {
+    // source: https://regex101.com/r/Qrbzod/1
+    // examples:
+    //     dyld[80935]: <vistest/bind#7> -> 0x7ff80c4fd38f (libc++abi.dylib/__ZnwmRKSt9nothrow_t)
+    //     dyld[35136]: <Adobe Photoshop 2025/bind#1> -> 0x172bb7280 (dvacore/__ZN7dvacore6config12ErrorManager28DecrementLazilyDisplayErrorsEv)
+    // the above will change whenever the regex is updated, so please update the link so we can extend/debug as necessary.
+    const std::regex bind_regex(R"REGEX(dyld\[[0-9]+\]: <([^/]+)\/bind#([0-9]+)> -> 0x([0-9a-fA-F]+) \(([^/]*)\/([^)]*)\))REGEX");
+    std::match_results<std::string_view::const_iterator> bind_match;
+
+    if (!std::regex_match(statement.begin(), statement.end(), bind_match, bind_regex)) return std::nullopt;
+
+    symbol_binding result;
+
+    // comments are the field names from the string formatter in dyld's `JustInTimeLoader.cpp`
+    result.user = bind_match[1].str(); // this->leafName(state)
+    result.user_index = std::atoi(bind_match[2].str().c_str()); // bindTargets.count()
+    result.address = bind_match[3].str(); // targetAddr
+    result.provider = bind_match[4].str(); // targetLoaderName
+    const auto& name_match = bind_match[5];
+    result.name = name_match.str(); // target.targetSymbolName
+
+    if (result.name.size() > 512) {
+        int x{42};
+        (void)x;
+    }
+
+    return result;
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+
 void process_dyld_output(const std::string& output) {
     std::cout << std::format("dyldout size {}\n", human_size(output.size()));
 
     const auto lines = split(output, '\n');
 
-    // to regex, or not to regex? That is the question.
-    // example: `dyld[80935]: <vistest/bind#7> -> 0x7ff80c4fd38f (libc++abi.dylib/__ZnwmRKSt9nothrow_t)`
-
     std::unordered_map<std::string_view, std::string> bind_map;
 
-    std::regex
+    std::vector<symbol_binding> bindings;
 
-    for (const auto& line : lines) {
-        const auto tokens = split(line, ' ');
-        if (tokens.size() >= 5 && tokens[1].find("/bind#") != std::string::npos) {
-            std::string_view address = tokens[3];
-            std::string_view symbol = tokens[4];
-            // the symbol is wrapped in parens, so pop those.
-            std::string demangled = demangle(symbol.substr(1, symbol.size() - 2));
-            // std::cout << "rebound " << demangled << '\n';
-            const auto found = bind_map.find(address);
-            if (found != bind_map.end()) {
-                std::cout << std::format("bind: {} uses {}\n", bind_image(tokens[1]), bind_map[address]);
-            } else {
-                std::cout << std::format("bind: {} gets {}\n", bind_image(tokens[1]), demangled);
-                bind_map[address] = std::move(demangled);
-            }
+    std::size_t progress = 0;
+    float count = 0;
+    for (const auto& line_view : lines) {
+        std::size_t new_progress = std::floor(++count / lines.size() * 100);
+        if (new_progress != progress) {
+            std::cout << ' ' << new_progress;
+            progress = new_progress;
         }
+        if (auto binding = process_binding_statement(line_view)) {
+            bindings.emplace_back(std::move(*binding));
+        }
+    }
+
+    std::cout << '\n' << bindings.size() << " bindings\n";
+
+    for (const auto& binding : bindings) {
+        if (binding.name.find("name_t") == std::string::npos) continue;
+        std::string demangled = demangle(binding.name);
+        if (demangled != "typeinfo for adobe::name_t") continue;
+        std::cout << std::format("{} #{} {} {} {}\n", binding.user, binding.user_index, binding.address, binding.provider, demangle(binding.name));
     }
 }
 
@@ -177,10 +220,11 @@ std::string dyld_wrapped_run(const std::filesystem::path& input) {
     // See https://www.manpagez.com/man/1/dyld/
     // Apple `dlyd` source: https://github.com/opensource-apple/dyld/blob/master/src/dyld.cpp
     const std::tuple<const char*, const char*> dyld_environment[] = {
-        {"DYLD_PRINT_BINDINGS", "1"},
-        // {"DYLD_PRINT_RPATHS", "1"},
-        // {"DYLD_PRINT_STATISTICS", "1"},
-        {"DYLD_PRINT_TO_FILE", dyldout_path_string.c_str()},
+        {"DYLD_PRINT_BINDINGS", "1"}, // print what symbols resolve to what addresses
+        {"DYLD_PRINT_LIBRARIES", "1"}, // print which libraries get loaded
+        {"DYLD_PRINT_SEARCHING", "1"}, // output path(s) searched and resolution when loading a dylib
+        // {"DYLD_PRINT_APIS", "1"}, // output when dyld APIs (e.g., `_dyld_get_objc_selector`) are called at runtime
+        {"DYLD_PRINT_TO_FILE", dyldout_path_string.c_str()}, // print dyld output to a file instead of stdout/stderr
     };
 
     std::cout << std::format("dyldout: {}\n", dyldout_path_string);
